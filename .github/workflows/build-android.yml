@@ -1,7 +1,8 @@
 name: Build jiegec-usbip for Android arm64
 
 on:
-  workflow_dispatch: # 支持在网页端手动点击触发
+  push:
+  workflow_dispatch:
 
 jobs:
   build:

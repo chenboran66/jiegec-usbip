@@ -45,10 +45,22 @@ jobs:
           make -j$(nproc)
           make install
 
-          # 2. 安装独立版 Asio 头文件
+          # 2. 安装独立版 Asio 头文件并生成 CMake 配置文件
           cd /tmp/build_deps
           git clone --depth 1 --branch asio-1-30-2 https://github.com/chriskohlhoff/asio.git
           cp -r asio/asio/include/* "$DEPS_PREFIX/include/"
+          mkdir -p "$DEPS_PREFIX/lib/cmake/asio"
+          printf '%s\n' \
+            'set(asio_FOUND TRUE)' \
+            'set(ASIO_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../../include")' \
+            'if(NOT TARGET asio::asio)' \
+            '  add_library(asio::asio INTERFACE IMPORTED)' \
+            '  set_target_properties(asio::asio PROPERTIES' \
+            '    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include"' \
+            '    INTERFACE_COMPILE_DEFINITIONS "ASIO_STANDALONE"' \
+            '  )' \
+            'endif()' \
+            > "$DEPS_PREFIX/lib/cmake/asio/asioConfig.cmake"
 
           # 3. 静态编译安装 spdlog
           cd /tmp/build_deps

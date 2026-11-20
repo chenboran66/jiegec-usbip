@@ -1,0 +1,50 @@
+name: Build jiegec-usbip for Android arm64
+
+on:
+  workflow_dispatch: # 支持在网页端手动点击触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 拉取 jiegec/usbip 源码
+        uses: actions/checkout@v4
+        with:
+          repository: jiegec/usbip
+
+      - name: 配置 Rust 与 arm64-android 目标
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: 安装 cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: 为 rusb 开启 vendored 静态链接 libusb
+        run: |
+          python3 -c '
+          import re
+          with open("Cargo.toml", "r") as f:
+              content = f.read()
+          # 将 rusb = "x.y" 替换为带 vendored 特性的格式，或向已有 features 追加 vendored
+          if re.search(r"rusb\s*=\s*\"", content):
+              content = re.sub(r"rusb\s*=\s*\"([^\"]+)\"", r"rusb = { version = \"\1\", features = [\"vendored\"] }", content)
+          elif "vendored" not in content:
+              content = re.sub(r"(rusb\s*=\s*\{[^}]*)\}", r"\1, features = [\"vendored\"] }", content)
+          with open("Cargo.toml", "w") as f:
+              f.write(content)
+          '
+          grep -n "rusb" Cargo.toml
+
+      - name: 使用预装 NDK 编译 host 示例程序
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: |
+          cargo ndk -t arm64-v8a build --release --example host
+
+      - name: 打包上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: usbip-host-android-arm64
+          path: target/aarch64-linux-android/release/examples/host

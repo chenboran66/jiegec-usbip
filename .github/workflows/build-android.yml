@@ -1,4 +1,4 @@
-name: Build jiegec-usbip for Android arm64
+name: Build usbipdcpp libusb_server for Android arm64
 
 on:
   push:
@@ -9,36 +9,89 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 拉取 jiegec/usbip 源码
+      - name: 拉取 yunsmall/usbipdcpp 源码
         uses: actions/checkout@v4
         with:
-          repository: jiegec/usbip
+          repository: yunsmall/usbipdcpp
+          submodules: recursive
 
-      - name: 配置 Rust 与 aarch64-unknown-linux-musl 目标
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-musl
-
-      - name: 安装 Zig 与 cargo-zigbuild
+      - name: 安装基础构建工具
         run: |
-          pip3 install --break-system-packages ziglang
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          cargo install --locked cargo-zigbuild
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config ninja-build cmake
 
-      - name: 为 rusb 开启 vendored 静态链接 libusb
+      - name: 使用 NDK 静态编译依赖 (libusb, spdlog, asio)
         run: |
-          sed -i 's/^rusb = "\([^"]*\)"/rusb = { version = "\1", features = ["vendored"] }/' Cargo.toml
-          grep -n "rusb" Cargo.toml
+          set -e
+          export NDK="$ANDROID_NDK_ROOT"
+          export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          export DEPS_PREFIX="$GITHUB_WORKSPACE/deps_arm64"
+          mkdir -p "$DEPS_PREFIX" /tmp/build_deps
 
-      - name: 静态交叉编译 host 示例程序
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
+          # 1. 静态编译 libusb (关闭 udev，适配安卓)
+          cd /tmp/build_deps
+          git clone --depth 1 --branch v1.0.27 https://github.com/libusb/libusb.git
+          cd libusb
+          ./autogen.sh --noconfigure
+          CC="$TOOLCHAIN/bin/aarch64-linux-android29-clang" \
+          AR="$TOOLCHAIN/bin/llvm-ar" \
+          RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
+          ./configure \
+            --host=aarch64-linux-android \
+            --prefix="$DEPS_PREFIX" \
+            --enable-static \
+            --disable-shared \
+            --disable-udev
+          make -j$(nproc)
+          make install
+
+          # 2. 安装独立版 Asio 头文件
+          cd /tmp/build_deps
+          git clone --depth 1 --branch asio-1-30-2 https://github.com/chriskohlhoff/asio.git
+          cp -r asio/asio/include/* "$DEPS_PREFIX/include/"
+
+          # 3. 静态编译安装 spdlog
+          cd /tmp/build_deps
+          git clone --depth 1 --branch v1.14.1 https://github.com/gabime/spdlog.git
+          cmake -S spdlog -B spdlog/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_INSTALL_PREFIX="$DEPS_PREFIX" \
+            -DSPDLOG_BUILD_SHARED=OFF \
+            -DSPDLOG_BUILD_EXAMPLE=OFF
+          cmake --build spdlog/build --target install
+
+      - name: 静态编译 usbipdcpp 与 libusb_server
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-musl --example host
-          file target/aarch64-unknown-linux-musl/release/examples/host
+          set -e
+          export NDK="$ANDROID_NDK_ROOT"
+          export DEPS_PREFIX="$GITHUB_WORKSPACE/deps_arm64"
+          export PKG_CONFIG_LIBDIR="$DEPS_PREFIX/lib/pkgconfig"
+
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$DEPS_PREFIX" \
+            -DCMAKE_FIND_ROOT_PATH="$DEPS_PREFIX" \
+            -DUSBIPDCPP_BUILD_SHARED_LIBS=OFF \
+            -DUSBIPDCPP_BUILD_LIBUSB_COMPONENTS=ON \
+            -DUSBIPDCPP_BUILD_VIRTUAL_DEVICE=OFF
+
+          cmake --build build --target libusb_server -j$(nproc)
+
+          # 收集产物并检查架构
+          mkdir -p out
+          BIN_PATH=$(find build -type f -name "libusb_server" | head -n 1)
+          cp "$BIN_PATH" out/libusb_server
+          file out/libusb_server
 
       - name: 打包上传编译产物
         uses: actions/upload-artifact@v4
         with:
-          name: usbip-host-android-arm64
-          path: target/aarch64-unknown-linux-musl/release/examples/host
+          name: usbipdcpp-libusb-server-android-arm64
+          path: out/libusb_server

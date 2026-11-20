@@ -26,11 +26,7 @@ jobs:
           sed -i 's/^rusb = "\([^"]*\)"/rusb = { version = "\1", features = ["vendored"] }/' Cargo.toml
           grep -n "rusb" Cargo.toml
 
-      - name: 使用预装 NDK 编译 host 示例程序
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-        run: |
-          cargo ndk -t arm64-v8a build --release --example host
+        
 
       - name: 打包上传编译产物
         uses: actions/upload-artifact@v4

@@ -21,21 +21,9 @@ jobs:
 
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk
-
       - name: 为 rusb 开启 vendored 静态链接 libusb
         run: |
-          python3 -c '
-          import re
-          with open("Cargo.toml", "r") as f:
-              content = f.read()
-          # 将 rusb = "x.y" 替换为带 vendored 特性的格式，或向已有 features 追加 vendored
-          if re.search(r"rusb\s*=\s*\"", content):
-              content = re.sub(r"rusb\s*=\s*\"([^\"]+)\"", r"rusb = { version = \"\1\", features = [\"vendored\"] }", content)
-          elif "vendored" not in content:
-              content = re.sub(r"(rusb\s*=\s*\{[^}]*)\}", r"\1, features = [\"vendored\"] }", content)
-          with open("Cargo.toml", "w") as f:
-              f.write(content)
-          '
+          sed -i 's/^rusb = "\([^"]*\)"/rusb = { version = "\1", features = ["vendored"] }/' Cargo.toml
           grep -n "rusb" Cargo.toml
 
       - name: 使用预装 NDK 编译 host 示例程序

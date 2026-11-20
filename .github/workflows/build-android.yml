@@ -14,25 +14,31 @@ jobs:
         with:
           repository: jiegec/usbip
 
-      - name: 配置 Rust 与 arm64-android 目标
+      - name: 配置 Rust 与 aarch64-unknown-linux-musl 目标
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-unknown-linux-musl
 
-      - name: 安装 cargo-ndk
-        run: cargo install cargo-ndk
+      - name: 安装 Zig 与 cargo-zigbuild
+        run: |
+          pip3 install --break-system-packages ziglang
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cargo install --locked cargo-zigbuild
+
       - name: 为 rusb 开启 vendored 静态链接 libusb
         run: |
           sed -i 's/^rusb = "\([^"]*\)"/rusb = { version = "\1", features = ["vendored"] }/' Cargo.toml
           grep -n "rusb" Cargo.toml
 
-        
-      - name: 使用预装 NDK 编译 host 示例程序
+      - name: 静态交叉编译 host 示例程序
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: |
-          cargo ndk -t arm64-v8a build --release --example host
-          
+          cargo zigbuild --release --target aarch64-unknown-linux-musl --example host
+          file target/aarch64-unknown-linux-musl/release/examples/host
+
       - name: 打包上传编译产物
         uses: actions/upload-artifact@v4
         with:
           name: usbip-host-android-arm64
-          path: target/aarch64-linux-android/release/examples/host
+          path: target/aarch64-unknown-linux-musl/release/examples/host
